@@ -10,10 +10,16 @@ from sqlalchemy.orm import Session
 
 from app.db.session import SessionLocal
 from app.models import Task, TaskExecutionAttempt, TaskStatus
-from app.services.execution import TaskExecutionError, execute_job
+from app.services.execution import (
+    RetryableTaskExecutionError,
+    TaskExecutionError,
+    execute_job,
+)
 
 SessionFactory = Callable[[], Session]
 JobExecutor = Callable[[str, Mapping[str, Any]], None]
+RETRY_BACKOFF_BASE_SECONDS = 2
+RETRY_BACKOFF_MAX_SECONDS = 16
 
 
 class InvalidTaskIdError(ValueError):
@@ -28,6 +34,25 @@ class TaskExecutionFailedError(TaskExecutionError):
     """Raised after a job failure has been durably recorded."""
 
 
+class TaskRetryRequested(TaskExecutionError):
+    """Signals Celery after a retryable failure is durably queued."""
+
+    def __init__(
+        self,
+        *,
+        task_id: UUID,
+        retry_number: int,
+        countdown: int,
+        max_retries: int,
+        error_message: str,
+    ) -> None:
+        super().__init__(error_message)
+        self.task_id = task_id
+        self.retry_number = retry_number
+        self.countdown = countdown
+        self.max_retries = max_retries
+
+
 class LifecycleOutcome(str, Enum):
     COMPLETED = "COMPLETED"
     SKIPPED = "SKIPPED"
@@ -35,6 +60,15 @@ class LifecycleOutcome(str, Enum):
 
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def retry_countdown(retry_number: int) -> int:
+    """Return bounded exponential delay for a 1-based retry number."""
+
+    if retry_number < 1:
+        raise ValueError("retry_number must be at least 1")
+    delay = RETRY_BACKOFF_BASE_SECONDS**retry_number
+    return min(delay, RETRY_BACKOFF_MAX_SECONDS)
 
 
 def _parse_task_id(task_id: str | UUID) -> UUID:
@@ -119,12 +153,13 @@ def _complete_task(
         session.commit()
 
 
-def _fail_task(
+def _finalize_failure(
     task_id: UUID,
     attempt_id: UUID,
     error_message: str,
+    retryable: bool,
     session_factory: SessionFactory,
-) -> None:
+) -> TaskRetryRequested | None:
     finished_at = _utc_now()
     with session_factory() as session:
         task = session.get(Task, task_id)
@@ -132,12 +167,27 @@ def _fail_task(
         if task is None or attempt is None:
             raise TaskNotFoundError("Claimed task or execution attempt no longer exists")
 
-        task.status = TaskStatus.FAILED
+        retry_requested = retryable and task.retry_count < task.max_retries
+        if retry_requested:
+            task.retry_count += 1
+            task.status = TaskStatus.QUEUED
+        else:
+            task.status = TaskStatus.FAILED
         task.completed_at = None
         task.last_error = error_message
         attempt.finished_at = finished_at
         attempt.error = error_message
         session.commit()
+
+        if retry_requested:
+            return TaskRetryRequested(
+                task_id=task_id,
+                retry_number=task.retry_count,
+                countdown=retry_countdown(task.retry_count),
+                max_retries=task.max_retries,
+                error_message=error_message,
+            )
+        return None
 
 
 def process_task(
@@ -164,7 +214,16 @@ def process_task(
         executor(task_type, payload)
     except Exception as exc:
         error_message = _safe_error_message(exc)
-        _fail_task(parsed_task_id, attempt_id, error_message, session_factory)
+        retry_request = _finalize_failure(
+            parsed_task_id,
+            attempt_id,
+            error_message,
+            isinstance(exc, RetryableTaskExecutionError),
+            session_factory,
+        )
+        if retry_request is not None:
+            # The retry state is committed before control returns to Celery.
+            raise retry_request from exc
         raise TaskExecutionFailedError(error_message) from exc
 
     _complete_task(parsed_task_id, attempt_id, session_factory)

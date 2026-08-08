@@ -231,6 +231,7 @@ def test_unsupported_task_type_is_recorded_as_failed(
 
     persisted = load_task_with_attempts(session_factory, task.id)
     assert persisted.status is TaskStatus.FAILED
+    assert persisted.retry_count == 0
     assert persisted.execution_attempts[0].error == persisted.last_error
 
 
@@ -248,5 +249,6 @@ def test_malformed_echo_payload_is_recorded_as_failed(
 
     persisted = load_task_with_attempts(session_factory, task.id)
     assert persisted.status is TaskStatus.FAILED
+    assert persisted.retry_count == 0
     assert persisted.execution_attempts[0].finished_at is not None
     assert "echo payload" in persisted.execution_attempts[0].error

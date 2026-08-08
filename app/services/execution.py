@@ -6,6 +6,10 @@ class TaskExecutionError(RuntimeError):
     """A safe domain error produced while executing task application logic."""
 
 
+class RetryableTaskExecutionError(TaskExecutionError):
+    """An explicit transient failure that may be retried within task limits."""
+
+
 TaskHandler = Callable[[Mapping[str, Any]], None]
 
 
