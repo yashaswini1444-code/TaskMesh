@@ -1,4 +1,5 @@
 from celery import Celery
+from kombu import Queue
 
 from app.core.config import get_settings
 
@@ -17,4 +18,11 @@ celery_app.conf.update(
     timezone="UTC",
     task_always_eager=False,
     task_ignore_result=True,
+    task_queues=(
+        Queue("high"),
+        Queue("medium"),
+        Queue("low"),
+    ),
+    task_default_queue="medium",
+    task_create_missing_queues=False,
 )

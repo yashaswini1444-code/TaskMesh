@@ -72,14 +72,15 @@ def test_create_task_starts_queued(client: TestClient, dispatcher: Mock) -> None
     assert body["completed_at"] is None
     assert body["last_error"] is None
     dispatcher.dispatch.assert_called_once()
-    dispatched_id = dispatcher.dispatch.call_args.args[0]
+    dispatched_id, dispatched_priority = dispatcher.dispatch.call_args.args
     assert str(dispatched_id) == body["id"]
+    assert dispatched_priority.value == "MEDIUM"
 
 
 def test_task_is_persisted_before_dispatch(
     client: TestClient, dispatcher: Mock
 ) -> None:
-    def assert_task_is_readable(task_id: object) -> None:
+    def assert_task_is_readable(task_id: object, priority: object) -> None:
         response = client.get(f"/tasks/{task_id}")
         assert response.status_code == 200
 
@@ -108,12 +109,15 @@ def test_dispatch_failure_preserves_queued_task(
 
 @pytest.mark.parametrize("priority", ["HIGH", "MEDIUM", "LOW"])
 def test_create_task_accepts_supported_priorities(
-    client: TestClient, priority: str
+    client: TestClient, dispatcher: Mock, priority: str
 ) -> None:
     response = client.post("/tasks", json=task_request(priority=priority))
 
     assert response.status_code == 201
     assert response.json()["priority"] == priority
+    dispatched_id, dispatched_priority = dispatcher.dispatch.call_args.args
+    assert str(dispatched_id) == response.json()["id"]
+    assert dispatched_priority.value == priority
 
 
 def test_create_task_rejects_invalid_priority(client: TestClient) -> None:

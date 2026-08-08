@@ -13,5 +13,15 @@ def test_celery_uses_redis_json_and_utc_without_eager_execution() -> None:
     assert celery_app.conf.result_backend is None
 
 
+def test_celery_declares_only_priority_queues() -> None:
+    assert {queue.name for queue in celery_app.conf.task_queues} == {
+        "high",
+        "medium",
+        "low",
+    }
+    assert celery_app.conf.task_default_queue == "medium"
+    assert celery_app.conf.task_create_missing_queues is False
+
+
 def test_execute_task_is_registered_without_running_a_worker() -> None:
     assert execute_task.name == "taskmesh.execute_task"

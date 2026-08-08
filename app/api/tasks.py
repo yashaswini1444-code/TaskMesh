@@ -27,7 +27,7 @@ def submit_task(
 ) -> Task:
     task = create_task(session, task_data)
     try:
-        dispatcher.dispatch(task.id)
+        dispatcher.dispatch(task.id, task.priority)
     except TaskDispatchError as exc:
         # Persistence and broker publication are intentionally separate in
         # Milestone 4. The committed QUEUED task remains traceable if Redis is
