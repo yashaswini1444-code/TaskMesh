@@ -1,60 +1,159 @@
 # TaskMesh
 
-TaskMesh is an asynchronous job-processing API. SQLAlchemy is the persistent
-source of truth, while Celery and Redis provide asynchronous transport.
+TaskMesh is a portfolio-grade asynchronous job-processing system built with
+FastAPI, SQLAlchemy, PostgreSQL, Redis, and Celery. It persists task lifecycle
+and execution history in the database, routes work to priority-specific queues,
+applies bounded retries, and exposes operational state through an API and a
+lightweight dashboard.
 
-## Priority queue workers
+## Highlights
 
-Task submissions are routed by their persisted priority:
+- Durable task and per-attempt history with SQLAlchemy 2.x and Alembic
+- HIGH, MEDIUM, and LOW queues with dedicated Celery workers
+- Atomic task claims and explicit lifecycle transitions
+- Exponential retry backoff and dead-letter handling
+- Safe, conditional requeue of dead-letter tasks
+- Database, queue, and worker monitoring with graceful degradation
+- Responsive dashboard with live polling and execution-attempt detail
+- Deterministic SQLite test suite; no infrastructure required for tests
+- Docker Compose development stack and reproducible HTTP load tool
 
-- `HIGH` to `high`
-- `MEDIUM` to `medium`
-- `LOW` to `low`
+## Architecture
 
-Run a worker for one queue from the project root:
-
-```powershell
-celery -A app.workers.celery_app.celery_app worker -Q high --loglevel=info
-celery -A app.workers.celery_app.celery_app worker -Q medium --loglevel=info
-celery -A app.workers.celery_app.celery_app worker -Q low --loglevel=info
+```text
+client / dashboard
+       |
+       v
+   FastAPI API --------> PostgreSQL
+       |                 tasks + execution attempts
+       v
+     Redis
+  high | medium | low
+       v
+ dedicated Celery workers
 ```
 
-A worker can consume all three queues when workload separation is not needed:
+PostgreSQL is the persistent source of truth. Redis/Celery is transport and
+execution infrastructure; TaskMesh does not treat Celery result state as task
+history. See [the architecture guide](docs/architecture.md) for lifecycle and
+failure-boundary details.
+
+## API
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/` | Service identity |
+| GET | `/health` | API liveness |
+| POST | `/tasks` | Persist and dispatch a task |
+| GET | `/tasks` | Paginated/filterable task list |
+| GET | `/tasks/{task_id}` | Task and execution-attempt history |
+| POST | `/tasks/{task_id}/requeue` | Requeue a dead-letter task |
+| GET | `/monitoring/summary` | Status, throughput, queue, and worker summary |
+| GET | `/dashboard` | Operational dashboard |
+
+Task-list filters are `priority`, `status`, and `task_type`. Pagination defaults
+to `offset=0&limit=20` and caps `limit` at 100.
+
+## Local setup (SQLite)
+
+Python 3.12 is the supported development version.
 
 ```powershell
-celery -A app.workers.celery_app.celery_app worker -Q high,medium,low --loglevel=info
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+python -m alembic upgrade head
+python -m uvicorn app.main:app --reload
 ```
 
-Queue routing provides workload separation; it does not guarantee that every
-HIGH task globally finishes before MEDIUM or LOW tasks. Execution order depends
-on worker allocation, concurrency, prefetching, and Celery scheduling behavior.
+The safe default database is `sqlite:///./taskmesh.db`. The API is available at
+`http://localhost:8000`, Swagger UI at `/docs`, and the dashboard at
+`/dashboard`. Submitting work also needs a Redis broker and worker; without one,
+the API returns 503 after preserving the QUEUED task for diagnosis.
 
-## Supported task types
-
-Milestone 6 supports an offline `echo` task. Its payload must contain a
-non-empty string under `message`, for example:
+The implemented `echo` task expects a non-empty string in `payload.message`:
 
 ```json
 {"task_type": "echo", "payload": {"message": "hello"}, "priority": "MEDIUM"}
 ```
 
-Workers atomically claim only `QUEUED` tasks, commit the `RUNNING` state and
-execution-attempt record, and then run the handler. A process crash after that
-commit can leave the task `RUNNING` with an unfinished attempt. Recovery of
-abandoned work is intentionally deferred to a later milestone.
+## Docker Compose
 
-## Retries
+Copy the safe template, choose a local-only PostgreSQL password, and start the
+stack. Do not commit the resulting `.env` file.
 
-Handlers must explicitly raise `RetryableTaskExecutionError` for transient
-failures. Validation errors, unsupported task types, and unexpected exceptions
-are permanent failures and are not retried.
+```powershell
+Copy-Item .env.example .env
+docker compose config
+docker compose build
+docker compose up -d
+docker compose ps
+```
 
-`max_retries` is the number of retries allowed after the initial execution;
-`retry_count` is the number already scheduled and is never greater than that
-limit. Each real execution keeps its own durable attempt record. Retry delays
-are 2, 4, 8, and 16 seconds, capped at 16 seconds for later retries. No worker
-sleeps while waiting; Celery schedules the countdown on the original queue.
+The API container applies migrations after PostgreSQL becomes healthy. Separate
+workers consume `high`, `medium`, and `low`. Shut down with:
 
-Retry state is committed before Celery schedules the next delivery. A worker or
-broker failure in between can leave a `QUEUED` task with an incremented retry
-count but no retry message. Recovery/outbox processing is not implemented yet.
+```powershell
+docker compose down
+```
+
+Use `docker compose down -v` only when intentionally deleting local database and
+Redis volumes.
+
+## Configuration
+
+| Variable | Default | Description |
+|---|---|---|
+| `TASKMESH_DATABASE_URL` | `sqlite:///./taskmesh.db` | SQLAlchemy URL; use `postgresql+psycopg://...` in deployment |
+| `TASKMESH_CELERY_BROKER_URL` | `redis://localhost:6379/0` | Redis broker and queue inspection endpoint |
+| `TASKMESH_APP_NAME` | `TaskMesh` | API display name |
+| `TASKMESH_APP_VERSION` | `0.1.0` | API version |
+| `TASKMESH_DEBUG` | `false` | FastAPI debug mode |
+
+## Tests and load validation
+
+The standard suite is fully offline and uses temporary SQLite databases and
+dependency overrides:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -v --basetemp=.pytest_tmp -p no:cacheprovider
+```
+
+With a running local stack, exercise the submission API safely:
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.load_test --tasks 100 --concurrency 10
+```
+
+The tool refuses non-loopback targets unless explicitly overridden. See
+[load testing](docs/load-testing.md) for interpretation and limitations.
+
+## Retry and dead-letter semantics
+
+Handlers explicitly mark transient errors as retryable. Delays grow 2, 4, 8,
+then 16 seconds and stay capped at 16 seconds. `max_retries` counts deliveries
+after the first attempt. Exhausted retryable tasks enter `DEAD_LETTER`; permanent
+failures enter `FAILED`. A requeue resets retry state while preserving attempt
+history and routes the task through its original priority queue.
+
+## Known limitations
+
+- Dispatch and database commit are separate operations; a durable transactional
+  outbox is not implemented.
+- A worker crash after committing RUNNING can leave an abandoned task; lease and
+  recovery processing is not implemented.
+- Authentication, authorization, rate limiting, distributed tracing, and
+  production secret management are outside this portfolio scope.
+- Queue priority isolates workloads but cannot guarantee global completion order.
+- Monitoring is a bounded snapshot, not a long-term metrics store.
+
+## Further reading
+
+- [Architecture and lifecycle](docs/architecture.md)
+- [Load-testing guide](docs/load-testing.md)
+- [Evidence-based resume claims](docs/resume-claims.md)
+- [Interview guide](docs/interview-guide.md)
+
+## License
+
+No license has been granted. Add an explicit license before redistribution.

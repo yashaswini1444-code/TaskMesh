@@ -5,8 +5,11 @@ import statistics
 import time
 from dataclasses import asdict, dataclass
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx2 as httpx
+
+LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
 
 
 @dataclass
@@ -47,6 +50,17 @@ def summarize(results: list[SubmissionResult], duration: float) -> dict[str, Any
         },
         "errors": [result.error for result in results if result.error][:10],
     }
+
+
+def validate_base_url(base_url: str, *, allow_remote: bool = False) -> str:
+    parsed = urlparse(base_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise ValueError("--base-url must be an absolute HTTP(S) URL")
+    if not allow_remote and parsed.hostname.lower() not in LOOPBACK_HOSTS:
+        raise ValueError(
+            "remote targets are disabled; use --allow-remote only with authorization"
+        )
+    return base_url.rstrip("/")
 
 
 async def submit_one(
@@ -113,6 +127,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--tasks", type=int, default=30)
     parser.add_argument("--concurrency", type=int, default=5)
     parser.add_argument("--timeout", type=float, default=10.0)
+    parser.add_argument(
+        "--allow-remote",
+        action="store_true",
+        help="allow an explicitly authorized non-loopback target",
+    )
     args = parser.parse_args()
     if not 1 <= args.tasks <= 10_000:
         parser.error("--tasks must be between 1 and 10000")
@@ -120,6 +139,13 @@ def parse_args() -> argparse.Namespace:
         parser.error("--concurrency must be between 1 and 500")
     if args.timeout <= 0:
         parser.error("--timeout must be positive")
+    try:
+        args.base_url = validate_base_url(
+            args.base_url,
+            allow_remote=args.allow_remote,
+        )
+    except ValueError as exc:
+        parser.error(str(exc))
     return args
 
 
