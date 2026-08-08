@@ -28,3 +28,17 @@ celery -A app.workers.celery_app.celery_app worker -Q high,medium,low --loglevel
 Queue routing provides workload separation; it does not guarantee that every
 HIGH task globally finishes before MEDIUM or LOW tasks. Execution order depends
 on worker allocation, concurrency, prefetching, and Celery scheduling behavior.
+
+## Supported task types
+
+Milestone 6 supports an offline `echo` task. Its payload must contain a
+non-empty string under `message`, for example:
+
+```json
+{"task_type": "echo", "payload": {"message": "hello"}, "priority": "MEDIUM"}
+```
+
+Workers atomically claim only `QUEUED` tasks, commit the `RUNNING` state and
+execution-attempt record, and then run the handler. A process crash after that
+commit can leave the task `RUNNING` with an unfinished attempt. Recovery of
+abandoned work is intentionally deferred to a later milestone.
