@@ -1,0 +1,72 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: taskmesh
+      POSTGRES_USER: taskmesh
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U taskmesh -d taskmesh"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build: .
+    command: ["sh", "-c", "python -m alembic upgrade head && python -m uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+    environment: &taskmesh-environment
+      TASKMESH_DATABASE_URL: postgresql+psycopg://taskmesh:${POSTGRES_PASSWORD}@postgres:5432/taskmesh
+      TASKMESH_CELERY_BROKER_URL: redis://redis:6379/0
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  worker-high:
+    build: .
+    command: ["python", "-m", "celery", "-A", "app.workers.celery_app.celery_app", "worker", "-Q", "high", "--loglevel=info"]
+    environment: *taskmesh-environment
+    depends_on:
+      api:
+        condition: service_healthy
+
+  worker-medium:
+    build: .
+    command: ["python", "-m", "celery", "-A", "app.workers.celery_app.celery_app", "worker", "-Q", "medium", "--loglevel=info"]
+    environment: *taskmesh-environment
+    depends_on:
+      api:
+        condition: service_healthy
+
+  worker-low:
+    build: .
+    command: ["python", "-m", "celery", "-A", "app.workers.celery_app.celery_app", "worker", "-Q", "low", "--loglevel=info"]
+    environment: *taskmesh-environment
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  redis_data:
