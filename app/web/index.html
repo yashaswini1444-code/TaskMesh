@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TaskMesh Operations</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div><span class="eyebrow">TASKMESH</span><h1>Operations Console</h1></div>
+    <div id="refresh-status" class="refresh">Connecting…</div>
+  </header>
+  <main>
+    <section aria-labelledby="overview-title">
+      <div class="section-title"><h2 id="overview-title">System overview</h2><span>Live · 4s refresh</span></div>
+      <div id="summary-cards" class="cards"></div>
+    </section>
+    <section class="split">
+      <article class="panel"><div class="section-title"><h2>Priority queues</h2></div><div id="queues" class="queue-list"></div></article>
+      <article class="panel"><div class="section-title"><h2>Workers</h2></div><div id="workers"></div></article>
+    </section>
+    <section class="panel">
+      <div class="section-title"><h2>Recent tasks</h2><span>Persistent database state</span></div>
+      <div class="table-wrap"><table><thead><tr><th>Task</th><th>Type</th><th>Priority</th><th>Status</th><th>Retries</th><th>Created</th><th></th></tr></thead><tbody id="recent-tasks"></tbody></table></div>
+    </section>
+    <section class="panel failures">
+      <div class="section-title"><h2>Failures & dead letters</h2></div>
+      <div id="failures" class="failure-list"></div>
+    </section>
+  </main>
+  <dialog id="task-dialog"><button id="dialog-close" class="close" aria-label="Close">×</button><div id="task-detail"></div></dialog>
+  <script src="/static/app.js" defer></script>
+</body>
+</html>
