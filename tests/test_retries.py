@@ -168,7 +168,7 @@ def test_exhausted_retries_become_terminal_without_exceeding_limit(
         )
 
     terminal, attempts = load_task(session_factory, task.id)
-    assert terminal.status is TaskStatus.FAILED
+    assert terminal.status is TaskStatus.DEAD_LETTER
     assert terminal.retry_count == terminal.max_retries == 2
     assert len(attempts) == terminal.max_retries + 1
     assert [attempt.error for attempt in attempts[:2]] == prior_errors
@@ -190,7 +190,7 @@ def test_zero_retries_fails_on_initial_attempt(
         )
 
     persisted, attempts = load_task(session_factory, task.id)
-    assert persisted.status is TaskStatus.FAILED
+    assert persisted.status is TaskStatus.DEAD_LETTER
     assert persisted.retry_count == 0
     assert len(attempts) == 1
 

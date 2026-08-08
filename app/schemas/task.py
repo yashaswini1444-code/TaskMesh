@@ -34,3 +34,18 @@ class TaskRead(BaseModel):
     started_at: datetime | None
     completed_at: datetime | None
     last_error: str | None
+
+
+class TaskExecutionAttemptRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    attempt_number: int
+    worker_identifier: str | None
+    started_at: datetime
+    finished_at: datetime | None
+    error: str | None
+
+
+class TaskDetail(TaskRead):
+    execution_attempts: list[TaskExecutionAttemptRead]

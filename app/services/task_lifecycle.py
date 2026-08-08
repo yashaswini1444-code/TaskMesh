@@ -171,6 +171,8 @@ def _finalize_failure(
         if retry_requested:
             task.retry_count += 1
             task.status = TaskStatus.QUEUED
+        elif retryable:
+            task.status = TaskStatus.DEAD_LETTER
         else:
             task.status = TaskStatus.FAILED
         task.completed_at = None

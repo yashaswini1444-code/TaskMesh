@@ -159,7 +159,7 @@ def test_get_task_returns_persisted_task(client: TestClient) -> None:
     response = client.get(f"/tasks/{created['id']}")
 
     assert response.status_code == 200
-    assert response.json() == created
+    assert response.json() == {**created, "execution_attempts": []}
 
 
 def test_get_task_returns_404_for_unknown_uuid(client: TestClient) -> None:

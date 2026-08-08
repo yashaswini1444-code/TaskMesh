@@ -6,13 +6,13 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.models import Task, TaskPriority, TaskStatus
-from app.schemas.task import TaskCreate, TaskRead
+from app.schemas.task import TaskCreate, TaskDetail, TaskRead
 from app.services.dispatcher import (
     TaskDispatcher,
     TaskDispatchError,
     get_task_dispatcher,
 )
-from app.services.tasks import create_task, get_task, list_tasks
+from app.services.tasks import create_task, get_task, list_tasks, requeue_dead_letter_task
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 DatabaseSession = Annotated[Session, Depends(get_db)]
@@ -61,7 +61,7 @@ def read_tasks(
     )
 
 
-@router.get("/{task_id}", response_model=TaskRead)
+@router.get("/{task_id}", response_model=TaskDetail)
 def read_task(task_id: UUID, session: DatabaseSession) -> Task:
     task = get_task(session, task_id)
     if task is None:
@@ -69,4 +69,36 @@ def read_task(task_id: UUID, session: DatabaseSession) -> Task:
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Task not found",
         )
+    return task
+
+
+@router.post("/{task_id}/requeue", response_model=TaskDetail)
+def requeue_task(
+    task_id: UUID,
+    session: DatabaseSession,
+    dispatcher: Dispatcher,
+) -> Task:
+    task = requeue_dead_letter_task(session, task_id)
+    if task is None:
+        existing = get_task(session, task_id)
+        if existing is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Task not found",
+            )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Only dead-letter tasks can be requeued",
+        )
+
+    try:
+        dispatcher.dispatch(task.id, task.priority)
+    except TaskDispatchError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "message": "Task was requeued but could not be dispatched",
+                "task_id": str(task.id),
+            },
+        ) from exc
     return task

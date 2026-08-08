@@ -1,7 +1,7 @@
 from uuid import UUID
 
-from sqlalchemy import Select, select
-from sqlalchemy.orm import Session
+from sqlalchemy import Select, select, update
+from sqlalchemy.orm import Session, selectinload
 
 from app.models import Task, TaskPriority, TaskStatus
 from app.schemas.task import TaskCreate
@@ -25,7 +25,30 @@ def create_task(session: Session, task_data: TaskCreate) -> Task:
 
 
 def get_task(session: Session, task_id: UUID) -> Task | None:
-    return session.get(Task, task_id)
+    return session.scalar(
+        select(Task)
+        .where(Task.id == task_id)
+        .options(selectinload(Task.execution_attempts))
+    )
+
+
+def requeue_dead_letter_task(session: Session, task_id: UUID) -> Task | None:
+    result = session.execute(
+        update(Task)
+        .where(Task.id == task_id, Task.status == TaskStatus.DEAD_LETTER)
+        .values(
+            status=TaskStatus.QUEUED,
+            retry_count=0,
+            started_at=None,
+            completed_at=None,
+            last_error=None,
+        )
+    )
+    if result.rowcount != 1:
+        session.rollback()
+        return None
+    session.commit()
+    return get_task(session, task_id)
 
 
 def list_tasks(
