@@ -14,6 +14,7 @@ class Settings(BaseSettings):
         default="sqlite:///./taskmesh.db",
         validation_alias=AliasChoices("TASKMESH_DATABASE_URL", "DATABASE_URL"),
     )
+    celery_broker_url: str = "redis://localhost:6379/0"
 
     model_config = SettingsConfigDict(
         env_file=".env",

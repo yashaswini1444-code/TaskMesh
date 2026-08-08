@@ -1,4 +1,5 @@
 from collections.abc import Generator
+from unittest.mock import Mock
 from uuid import uuid4
 
 import pytest
@@ -10,10 +11,20 @@ from sqlalchemy.pool import StaticPool
 from app.db.base import Base
 from app.db.session import get_db
 from app.main import app
+from app.services.dispatcher import (
+    TaskDispatcher,
+    TaskDispatchError,
+    get_task_dispatcher,
+)
 
 
 @pytest.fixture
-def client() -> Generator[TestClient, None, None]:
+def dispatcher() -> Mock:
+    return Mock(spec=TaskDispatcher)
+
+
+@pytest.fixture
+def client(dispatcher: Mock) -> Generator[TestClient, None, None]:
     engine = create_engine(
         "sqlite://",
         connect_args={"check_same_thread": False},
@@ -26,9 +37,11 @@ def client() -> Generator[TestClient, None, None]:
             yield session
 
     app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_task_dispatcher] = lambda: dispatcher
     with TestClient(app) as test_client:
         yield test_client
     app.dependency_overrides.pop(get_db, None)
+    app.dependency_overrides.pop(get_task_dispatcher, None)
     engine.dispose()
 
 
@@ -42,7 +55,7 @@ def task_request(
     }
 
 
-def test_create_task_starts_queued(client: TestClient) -> None:
+def test_create_task_starts_queued(client: TestClient, dispatcher: Mock) -> None:
     response = client.post("/tasks", json=task_request())
 
     assert response.status_code == 201
@@ -58,6 +71,39 @@ def test_create_task_starts_queued(client: TestClient) -> None:
     assert body["started_at"] is None
     assert body["completed_at"] is None
     assert body["last_error"] is None
+    dispatcher.dispatch.assert_called_once()
+    dispatched_id = dispatcher.dispatch.call_args.args[0]
+    assert str(dispatched_id) == body["id"]
+
+
+def test_task_is_persisted_before_dispatch(
+    client: TestClient, dispatcher: Mock
+) -> None:
+    def assert_task_is_readable(task_id: object) -> None:
+        response = client.get(f"/tasks/{task_id}")
+        assert response.status_code == 200
+
+    dispatcher.dispatch.side_effect = assert_task_is_readable
+
+    response = client.post("/tasks", json=task_request())
+
+    assert response.status_code == 201
+    dispatcher.dispatch.assert_called_once()
+
+
+def test_dispatch_failure_preserves_queued_task(
+    client: TestClient, dispatcher: Mock
+) -> None:
+    dispatcher.dispatch.side_effect = TaskDispatchError("broker unavailable")
+
+    response = client.post("/tasks", json=task_request())
+
+    assert response.status_code == 503
+    detail = response.json()["detail"]
+    assert detail["message"] == "Task was persisted but could not be dispatched"
+    persisted = client.get(f"/tasks/{detail['task_id']}")
+    assert persisted.status_code == 200
+    assert persisted.json()["status"] == "QUEUED"
 
 
 @pytest.mark.parametrize("priority", ["HIGH", "MEDIUM", "LOW"])
