@@ -10,13 +10,20 @@ def test_dashboard_and_static_assets_are_served() -> None:
         javascript = client.get("/static/app.js")
 
     assert dashboard.status_code == 200
-    assert "TaskMesh Operations" in dashboard.text
-    assert "System overview" in dashboard.text
-    assert "Priority queues" in dashboard.text
-    assert "Recent tasks" in dashboard.text
-    assert "Failures & dead letters" in dashboard.text
+    assert "TaskMesh — Distributed Task Operations" in dashboard.text
+    assert "Task Operations" in dashboard.text
+    assert "Task Lifecycle Overview" in dashboard.text
+    assert "Priority Queue Traffic" in dashboard.text
+    assert "Worker Fleet" in dashboard.text
+    assert "Recent Executions" in dashboard.text
+    assert "Dead Letter Queue" in dashboard.text
+    assert "System Health" in dashboard.text
     assert css.status_code == 200
-    assert "--cyan" in css.text
+    assert "--obsidian" in css.text
+    assert "--violet" in css.text
+    assert "prefers-reduced-motion" in css.text
     assert javascript.status_code == 200
     assert 'fetch("/monitoring/summary")' in javascript.text
+    assert 'fetch(`/tasks/${encodeURIComponent(id)}`)' in javascript.text
+    assert 'method: "POST"' in javascript.text
     assert "execution_attempts" in javascript.text
