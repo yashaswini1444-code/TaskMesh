@@ -67,6 +67,29 @@ services:
       api:
         condition: service_healthy
 
+  worker-control:
+    build: .
+    # Administrative/periodic work (currently: stale-RUNNING lease
+    # recovery) is isolated on its own queue and worker so it never
+    # competes with priority task capacity. See app/services/recovery.py.
+    command: ["python", "-m", "celery", "-A", "app.workers.celery_app.celery_app", "worker", "-Q", "control", "--loglevel=info"]
+    environment: *taskmesh-environment
+    depends_on:
+      api:
+        condition: service_healthy
+
+  scheduler:
+    build: .
+    # Celery Beat triggers the periodic recovery scan on worker-control's
+    # queue (see beat_schedule in app/workers/celery_app.py). Beat only
+    # schedules; it does not execute tasks itself, so it does not need its
+    # own queue subscription.
+    command: ["python", "-m", "celery", "-A", "app.workers.celery_app.celery_app", "beat", "--loglevel=info"]
+    environment: *taskmesh-environment
+    depends_on:
+      api:
+        condition: service_healthy
+
 volumes:
   postgres_data:
   redis_data:
