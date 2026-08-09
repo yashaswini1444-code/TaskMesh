@@ -51,6 +51,13 @@ mocks, and can be defended in detail if asked "how do you know?"
   semantics (late-ack, worker-loss rejection) rather than leaving them at
   framework defaults, with the resulting duplicate-delivery risk
   deliberately made safe by the atomic claim mechanism above.
+- Load-tested concurrent task submission bursts against the real
+  multi-worker stack — not a one-off local run, but a step in the CI
+  `integration` job (`scripts/load_test.py --tasks 200 --concurrency 20`)
+  that executes on every push against real PostgreSQL, Redis, and four
+  live Celery worker processes, and fails the build if any submission
+  fails. See [docs/load-testing.md](load-testing.md) for how to read the
+  live result instead of trusting a hardcoded number.
 
 ## Conditional claims
 

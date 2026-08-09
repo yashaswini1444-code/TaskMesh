@@ -95,6 +95,19 @@ jobs:
           disown -a
       - name: Run integration suite against real PostgreSQL + Redis + Celery
         run: python -m pytest tests/integration -v -p no:cacheprovider -m integration
+      - name: Load test against the real 4-worker stack
+        run: |
+          python -m scripts.load_test --tasks 200 --concurrency 20 --base-url http://127.0.0.1:8000 \
+            | tee /tmp/taskmesh-logs/load-test-result.json
+          python -c "
+          import json
+          with open('/tmp/taskmesh-logs/load-test-result.json') as f:
+              result = json.load(f)
+          attempted = result['requests_attempted']
+          successful = result['successful_submissions']
+          print(f'load test: {successful}/{attempted} submissions succeeded')
+          assert successful == attempted, f'load test had failed submissions: {result}'
+          "
       - name: Show service logs
         if: always()
         run: |

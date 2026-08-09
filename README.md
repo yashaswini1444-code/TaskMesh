@@ -298,8 +298,11 @@ Three independent GitHub Actions jobs run on every push:
    the actual FastAPI app, then runs `tests/integration/` against all of it:
    migration correctness on real PostgreSQL, priority routing verified by
    which worker process executed the task, a deterministic failure path,
-   dead-letter requeue through a real redispatch, monitoring against real
-   infrastructure, and the PostgreSQL-specific concurrent-claim proof. All
+   dead-letter requeue through a real redispatch, stale-task lease recovery
+   through a real redispatch, monitoring against real infrastructure, and
+   the PostgreSQL-specific concurrent-claim proof — then runs
+   `scripts/load_test.py` (200 tasks, concurrency 20) against that same
+   live four-worker stack and fails the job if any submission fails. All
    waits are bounded (timeout + poll, never an arbitrary sleep); a stack
    that never becomes ready fails the job instead of hanging.
 
