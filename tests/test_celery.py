@@ -13,11 +13,12 @@ def test_celery_uses_redis_json_and_utc_without_eager_execution() -> None:
     assert celery_app.conf.result_backend is None
 
 
-def test_celery_declares_only_priority_queues() -> None:
+def test_celery_declares_priority_and_control_queues() -> None:
     assert {queue.name for queue in celery_app.conf.task_queues} == {
         "high",
         "medium",
         "low",
+        "control",
     }
     assert celery_app.conf.task_default_queue == "medium"
     assert celery_app.conf.task_create_missing_queues is False
@@ -25,3 +26,18 @@ def test_celery_declares_only_priority_queues() -> None:
 
 def test_execute_task_is_registered_without_running_a_worker() -> None:
     assert execute_task.name == "taskmesh.execute_task"
+
+
+def test_recovery_beat_schedule_targets_control_queue() -> None:
+    from app.core.config import get_settings
+
+    entry = celery_app.conf.beat_schedule["recover-stale-running-tasks"]
+    assert entry["task"] == "taskmesh.recover_stale_tasks"
+    assert entry["options"] == {"queue": "control"}
+    assert entry["schedule"] == get_settings().task_recovery_interval_seconds
+
+
+def test_recover_stale_tasks_task_is_registered() -> None:
+    from app.workers.tasks import recover_stale_tasks_task
+
+    assert recover_stale_tasks_task.name == "taskmesh.recover_stale_tasks"

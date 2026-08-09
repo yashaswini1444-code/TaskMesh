@@ -18,3 +18,17 @@ def execute_task(self: object, task_id: str) -> None:
             countdown=retry_request.countdown,
             max_retries=retry_request.max_retries,
         )
+
+
+@celery_app.task(name="taskmesh.recover_stale_tasks", ignore_result=True)
+def recover_stale_tasks_task() -> None:
+    """Celery Beat entry point for lease recovery. See beat_schedule in
+    celery_app.py and app.services.recovery for the actual logic.
+
+    Imported locally (not at module scope) to avoid a circular import:
+    services.recovery -> services.dispatcher -> workers.tasks.
+    """
+
+    from app.services.recovery import recover_stale_tasks
+
+    recover_stale_tasks()

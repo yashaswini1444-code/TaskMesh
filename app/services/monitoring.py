@@ -17,6 +17,7 @@ from app.schemas.monitoring import (
     WorkerItem,
     WorkerStatus,
 )
+from app.services.recovery import count_stale_running
 from app.workers.celery_app import celery_app
 
 logger = logging.getLogger("taskmesh.monitoring")
@@ -108,12 +109,14 @@ def _query_task_metrics(
         select(Task.status, func.count(Task.id)).group_by(Task.status)
     ).all()
     counts = {status: count for status, count in status_rows}
+    stale_running = count_stale_running(session, now=current_time)
     task_counts = TaskCounts(
         queued=counts.get(TaskStatus.QUEUED, 0),
         running=counts.get(TaskStatus.RUNNING, 0),
         completed=counts.get(TaskStatus.COMPLETED, 0),
         failed=counts.get(TaskStatus.FAILED, 0),
         dead_letter=counts.get(TaskStatus.DEAD_LETTER, 0),
+        stale_running=stale_running,
     )
 
     window_start = current_time - timedelta(seconds=MONITORING_WINDOW_SECONDS)

@@ -100,6 +100,7 @@ def test_monitoring_summary_combines_durable_and_infrastructure_metrics(
         "completed": 1,
         "failed": 1,
         "dead_letter": 1,
+        "stale_running": 0,
     }
     assert body["throughput"]["window_seconds"] == 60
     assert body["throughput"]["completed"] == 1

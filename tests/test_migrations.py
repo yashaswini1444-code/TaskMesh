@@ -36,6 +36,7 @@ def test_initial_migration_upgrades_sqlite_database(
         "started_at",
         "completed_at",
         "last_error",
+        "lease_expires_at",
     }
     task_checks = {
         constraint["name"] for constraint in inspector.get_check_constraints("tasks")
@@ -48,6 +49,9 @@ def test_initial_migration_upgrades_sqlite_database(
         "ck_tasks_taskstatus",
     } <= task_checks
 
+    task_indexes = {index["name"] for index in inspector.get_indexes("tasks")}
+    assert "ix_tasks_status_lease_expires_at" in task_indexes
+
     attempt_unique_constraints = inspector.get_unique_constraints(
         "task_execution_attempts"
     )
@@ -55,5 +59,44 @@ def test_initial_migration_upgrades_sqlite_database(
         constraint["column_names"] == ["task_id", "attempt_number"]
         for constraint in attempt_unique_constraints
     )
+
+    get_settings.cache_clear()
+
+
+def test_lease_recovery_migration_downgrade_and_reupgrade(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Proves the downgrade path for the most recent migration actually
+    works, not just upgrade — the initial migration's downgrade is otherwise
+    never exercised by any test."""
+
+    database_path = tmp_path / "downgrade.db"
+    database_url = f"sqlite:///{database_path.as_posix()}"
+    monkeypatch.setenv("TASKMESH_DATABASE_URL", database_url)
+    get_settings.cache_clear()
+
+    config = Config("alembic.ini")
+    command.upgrade(config, "head")
+
+    engine = create_engine(database_url)
+    assert "lease_expires_at" in {
+        column["name"] for column in inspect(engine).get_columns("tasks")
+    }
+
+    command.downgrade(config, "-1")
+    engine.dispose()
+    engine = create_engine(database_url)
+    columns_after_downgrade = {
+        column["name"] for column in inspect(engine).get_columns("tasks")
+    }
+    assert "lease_expires_at" not in columns_after_downgrade
+    assert "status" in columns_after_downgrade  # base table intact
+
+    command.upgrade(config, "head")
+    engine.dispose()
+    engine = create_engine(database_url)
+    assert "lease_expires_at" in {
+        column["name"] for column in inspect(engine).get_columns("tasks")
+    }
 
     get_settings.cache_clear()

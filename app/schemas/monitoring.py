@@ -38,6 +38,7 @@ class TaskCounts(BaseModel):
     completed: int
     failed: int
     dead_letter: int
+    stale_running: int
 
 
 class ThroughputMetrics(BaseModel):
