@@ -116,7 +116,7 @@ function renderWorkers(workers) {
 function renderTasks(tasks) {
   $("recent-tasks").innerHTML = tasks.length ? tasks.map((task) => `<tr>
     <td><span class="task-id mono" title="${escapeHtml(task.id)}">${shortId(task.id)}</span></td><td>${escapeHtml(task.task_type)}</td><td>${priority(task.priority)}</td><td>${badge(task.status)}</td>
-    <td class="mono" title="Inspect for execution-attempt history">—</td><td title="${escapeHtml(dateTime(task.created_at))}">${escapeHtml(clockTime(task.created_at))}</td><td class="mono">${duration(task.started_at, task.completed_at)}</td>
+    <td class="mono" title="Persisted execution-attempt count">${task.attempt_count}</td><td title="${escapeHtml(dateTime(task.created_at))}">${escapeHtml(clockTime(task.created_at))}</td><td class="mono">${duration(task.started_at, task.completed_at)}</td>
     <td><button class="button button-link" data-inspect="${escapeHtml(task.id)}">Inspect</button></td></tr>`).join("") : `<tr><td colspan="8">${emptyState("Waiting for task activity", "No persisted tasks yet.")}</td></tr>`;
 }
 
@@ -139,12 +139,14 @@ function renderHealth(data) {
   // construction, not a hardcoded guess. It is worded differently from
   // "Healthy" to avoid implying a deeper API-side health check that does not
   // exist. Database/Celery/Redis are each derived from real response fields.
+  const staleCount = data.tasks ? data.tasks.stale_running : null;
   const states = [
     ["API", "Reachable", ""],
     ["Database", data.database.available ? "Healthy" : "Unavailable", data.database.available ? "" : "unknown"],
     ["Celery", data.workers.available ? "Online" : "Unavailable", data.workers.available ? "" : "unknown"],
     ["Redis", data.queues.available ? "Online" : "Unavailable", data.queues.available ? "" : "unknown"],
     ["Workers", data.workers.available ? `${data.workers.count} online` : "Unknown", data.workers.available ? "" : "unknown"],
+    ["Stale running", staleCount === null ? "Unknown" : staleCount > 0 ? `${staleCount} stalled` : "None", staleCount ? "degraded" : ""],
   ];
   $("health-grid").innerHTML = states.map(([name, value, className]) => `<div class="health-item"><span>${name}</span><strong><i class="status-dot ${className}"></i>${escapeHtml(value)}</strong></div>`).join("");
 }
@@ -208,7 +210,8 @@ async function showTask(id) {
         <div class="detail-item"><span>Completed</span><strong>${escapeHtml(dateTime(task.completed_at))}</strong></div><div class="detail-item"><span>Duration</span><strong class="mono">${duration(task.started_at, task.completed_at)}</strong></div></div></section>
       ${task.last_error ? `<section class="detail-section"><h3>Last error</h3><div class="error-box">${escapeHtml(task.last_error)}</div></section>` : ""}
       <section class="detail-section"><h3>Execution timeline</h3>${attempts.length ? `<div class="timeline">${attempts.map((attempt) => `<article class="timeline-item"><i class="timeline-dot"></i><div class="timeline-title"><strong>Attempt ${attempt.attempt_number}</strong><span>${attempt.error ? badge("FAILED") : attempt.finished_at ? badge("COMPLETED") : badge("RUNNING")}</span></div><div class="timeline-meta">${escapeHtml(attempt.worker_identifier || "Unknown worker")}<br>${escapeHtml(clockTime(attempt.started_at))} → ${escapeHtml(clockTime(attempt.finished_at))}</div>${attempt.error ? `<div class="timeline-error">${escapeHtml(attempt.error)}</div>` : ""}</article>`).join("")}</div>` : emptyState("No execution attempts", "This task has not been claimed by a worker.")}</section>
-      ${task.status === "DEAD_LETTER" ? `<section class="detail-section"><button class="button button-primary" data-requeue="${escapeHtml(task.id)}">Requeue Task</button></section>` : ""}`;
+      ${task.status === "DEAD_LETTER" ? `<section class="detail-section"><button class="button button-primary" data-requeue="${escapeHtml(task.id)}">Requeue Task</button></section>` : ""}
+      ${task.status === "QUEUED" ? `<section class="detail-section"><button class="button button-secondary" data-redispatch="${escapeHtml(task.id)}">Redispatch Task</button></section>` : ""}`;
     bindDynamicActions();
   } catch (_) {
     $("task-detail").innerHTML = emptyState("Task detail unavailable", "Close the inspector and try again.");
@@ -249,6 +252,42 @@ async function requeueSelected(event) {
   }
 }
 
+function requestRedispatch(id) {
+  selectedTaskId = id;
+  $("redispatch-dialog").showModal();
+}
+
+async function redispatchSelected(event) {
+  event.preventDefault();
+  $("confirm-redispatch").disabled = true;
+  try {
+    const response = await fetch(`/tasks/${encodeURIComponent(selectedTaskId)}/redispatch`, { method: "POST" });
+    if (!response.ok) throw new Error("Redispatch request failed");
+    $("redispatch-dialog").close(); closeDrawer(); showToast("Task redispatched successfully"); await refresh();
+  } catch (_) {
+    showToast("Task could not be redispatched", true);
+  } finally {
+    $("confirm-redispatch").disabled = false;
+  }
+}
+
+async function runRecovery(event) {
+  event.preventDefault();
+  $("confirm-recovery").disabled = true;
+  try {
+    const response = await fetch("/recovery/stale-running", { method: "POST" });
+    if (!response.ok) throw new Error("Recovery request failed");
+    const result = await response.json();
+    $("recovery-dialog").close();
+    showToast(result.reclaimed_count > 0 ? `Recovered ${result.reclaimed_count} stale task(s)` : "No stale tasks found");
+    await refresh();
+  } catch (_) {
+    showToast("Recovery run failed", true);
+  } finally {
+    $("confirm-recovery").disabled = false;
+  }
+}
+
 function showToast(message, isError = false) {
   const toast = document.createElement("div");
   toast.className = `toast${isError ? " error" : ""}`;
@@ -264,6 +303,9 @@ function bindDynamicActions() {
   });
   document.querySelectorAll("[data-requeue]").forEach((button) => {
     button.onclick = (event) => { event.stopPropagation(); requestRequeue(button.dataset.requeue); };
+  });
+  document.querySelectorAll("[data-redispatch]").forEach((button) => {
+    button.onclick = (event) => { event.stopPropagation(); requestRedispatch(button.dataset.redispatch); };
   });
 }
 
@@ -294,6 +336,9 @@ $("retry-button").addEventListener("click", refresh);
 $("drawer-close").addEventListener("click", closeDrawer);
 $("drawer-backdrop").addEventListener("click", closeDrawer);
 $("confirm-requeue").addEventListener("click", requeueSelected);
+$("confirm-redispatch").addEventListener("click", redispatchSelected);
+$("confirm-recovery").addEventListener("click", runRecovery);
+$("run-recovery-button").addEventListener("click", () => $("recovery-dialog").showModal());
 $("menu-button").addEventListener("click", () => {
   const open = $("sidebar").classList.toggle("open");
   $("menu-button").setAttribute("aria-expanded", String(open));

@@ -60,7 +60,9 @@ def list_tasks(
     task_status: TaskStatus | None = None,
     task_type: str | None = None,
 ) -> list[Task]:
-    statement: Select[tuple[Task]] = select(Task)
+    statement: Select[tuple[Task]] = select(Task).options(
+        selectinload(Task.execution_attempts)
+    )
     if priority is not None:
         statement = statement.where(Task.priority == priority)
     if task_status is not None:

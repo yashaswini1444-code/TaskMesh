@@ -105,7 +105,9 @@
         </div>
 
         <section class="surface" id="health" aria-labelledby="health-title">
-          <div class="section-heading"><div><p class="overline">Infrastructure</p><h2 id="health-title">System Health</h2></div><span>Current observable state</span></div>
+          <div class="section-heading"><div><p class="overline">Infrastructure</p><h2 id="health-title">System Health</h2></div>
+            <div class="section-actions"><span>Current observable state</span><button class="button button-secondary" id="run-recovery-button">Recover Stale Tasks</button></div>
+          </div>
           <div id="health-grid" class="health-grid"><div class="skeleton-lines"></div></div>
         </section>
       </main>
@@ -123,6 +125,20 @@
       <span class="warning-mark" aria-hidden="true">↻</span><h2 id="requeue-title">Requeue this task?</h2>
       <p>The retry counter will be reset while historical execution attempts remain preserved.</p>
       <div class="dialog-actions"><button class="button button-secondary" value="cancel">Cancel</button><button class="button button-primary" id="confirm-requeue" value="default">Requeue Task</button></div>
+    </form>
+  </dialog>
+  <dialog id="redispatch-dialog" class="confirm-dialog" aria-labelledby="redispatch-title">
+    <form method="dialog"><button class="icon-button dialog-close" value="cancel" aria-label="Close"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+      <span class="warning-mark" aria-hidden="true">⟳</span><h2 id="redispatch-title">Redispatch this task?</h2>
+      <p>Publishes a new broker message for this already-persisted task. Safe to repeat — duplicate messages are de-duplicated by the atomic task claim, not by this dialog.</p>
+      <div class="dialog-actions"><button class="button button-secondary" value="cancel">Cancel</button><button class="button button-primary" id="confirm-redispatch" value="default">Redispatch Task</button></div>
+    </form>
+  </dialog>
+  <dialog id="recovery-dialog" class="confirm-dialog" aria-labelledby="recovery-title">
+    <form method="dialog"><button class="icon-button dialog-close" value="cancel" aria-label="Close"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+      <span class="warning-mark" aria-hidden="true">⚠</span><h2 id="recovery-title">Recover stale running tasks?</h2>
+      <p>Reclaims RUNNING tasks whose execution lease has expired (presumed lost to a worker crash). Tasks with retry budget left are requeued and redispatched; exhausted tasks move to dead-letter.</p>
+      <div class="dialog-actions"><button class="button button-secondary" value="cancel">Cancel</button><button class="button button-primary" id="confirm-recovery" value="default">Run Recovery</button></div>
     </form>
   </dialog>
   <div id="toast-region" class="toast-region" aria-live="polite"></div>

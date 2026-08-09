@@ -34,6 +34,7 @@ class TaskRead(BaseModel):
     started_at: datetime | None
     completed_at: datetime | None
     last_error: str | None
+    attempt_count: int
 
 
 class TaskExecutionAttemptRead(BaseModel):

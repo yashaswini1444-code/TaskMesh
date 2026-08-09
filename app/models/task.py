@@ -84,3 +84,10 @@ class Task(Base):
         cascade="all, delete-orphan",
         order_by="TaskExecutionAttempt.attempt_number",
     )
+
+    @property
+    def attempt_count(self) -> int:
+        """Relies on execution_attempts being eagerly loaded (selectinload)
+        by the caller; touching this on a lazy, un-loaded relationship would
+        trigger an N+1 query per row in list views."""
+        return len(self.execution_attempts)

@@ -4,7 +4,7 @@ from typing import Protocol
 
 from redis import Redis
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.core.config import get_settings
 from app.models import Task, TaskStatus
@@ -137,12 +137,16 @@ def _query_task_metrics(
 
     recent_tasks = list(
         session.scalars(
-            select(Task).order_by(Task.created_at.desc(), Task.id.desc()).limit(10)
+            select(Task)
+            .options(selectinload(Task.execution_attempts))
+            .order_by(Task.created_at.desc(), Task.id.desc())
+            .limit(10)
         )
     )
     recent_failures = list(
         session.scalars(
             select(Task)
+            .options(selectinload(Task.execution_attempts))
             .where(Task.status.in_([TaskStatus.FAILED, TaskStatus.DEAD_LETTER]))
             .order_by(Task.created_at.desc(), Task.id.desc())
             .limit(10)
