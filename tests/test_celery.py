@@ -41,3 +41,23 @@ def test_recover_stale_tasks_task_is_registered() -> None:
     from app.workers.tasks import recover_stale_tasks_task
 
     assert recover_stale_tasks_task.name == "taskmesh.recover_stale_tasks"
+
+
+def test_celery_uses_late_ack_delivery_semantics() -> None:
+    """Explicit, not default: without these, a worker killed after receiving
+    a message but before claiming it in the DB loses that message forever
+    (see the reasoning documented next to these settings in celery_app.py).
+    Late-ack is only safe here because task_lifecycle._claim_task's
+    conditional UPDATE makes a resulting duplicate delivery a no-op."""
+
+    assert celery_app.conf.task_acks_late is True
+    assert celery_app.conf.task_reject_on_worker_lost is True
+
+
+def test_broker_visibility_timeout_matches_application_lease() -> None:
+    from app.core.config import get_settings
+
+    assert (
+        celery_app.conf.broker_transport_options["visibility_timeout"]
+        == get_settings().task_lease_seconds
+    )
