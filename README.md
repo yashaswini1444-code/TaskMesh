@@ -13,7 +13,7 @@ Every claim in this document is backed by a test that runs in CI — the
 deterministic suite (94 tests, SQLite, no infrastructure, ~10s) and a
 separate integration job that provisions real PostgreSQL and Redis
 containers and runs the actual multi-worker Celery topology
-(`tests/integration/`, 10 more tests). See
+(`tests/integration/`, 12 more tests). See
 [docs/resume-claims.md](docs/resume-claims.md) for exactly which claims are
 safe to make and which aren't.
 

@@ -58,7 +58,7 @@ True, but state the condition — don't let the headline outrun the scope.
 
 - "Tested against a production-shaped topology" — true of the CI
   `integration` job and Docker Compose, both of which run one worker per
-  queue plus a scheduler; the *deterministic* suite (94 of 104 tests) runs
+  queue plus a scheduler; the *deterministic* suite (94 of 106 tests) runs
   against SQLite only and proves business logic, not infrastructure
   behavior.
 - "At-least-once task delivery" — true given the configured Celery ack

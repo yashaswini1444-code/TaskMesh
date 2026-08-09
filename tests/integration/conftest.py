@@ -20,8 +20,6 @@ from collections.abc import Callable
 import httpx2 as httpx
 import pytest
 
-from app.workers.celery_app import celery_app
-
 BASE_URL = "http://127.0.0.1:8000"
 EXPECTED_WORKER_QUEUES = {"worker-high", "worker-medium", "worker-low", "worker-control"}
 
@@ -54,6 +52,14 @@ def wait_until(
 
 @pytest.fixture(scope="session", autouse=True)
 def live_stack_ready() -> None:
+    # Imported lazily, not at module scope: this conftest is imported during
+    # collection for *every* pytest invocation that touches tests/, even
+    # when everything under tests/integration/ is deselected via the
+    # `integration` marker. Importing celery at collection time on every
+    # single local run was pure overhead the deterministic suite doesn't
+    # need — this fixture only actually runs when an integration test does.
+    from app.workers.celery_app import celery_app
+
     def api_healthy() -> bool:
         response = httpx.get(f"{BASE_URL}/health", timeout=2.0)
         return response.status_code == 200

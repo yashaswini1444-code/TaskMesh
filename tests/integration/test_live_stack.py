@@ -12,6 +12,7 @@ persisted.
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import create_engine, text
@@ -163,6 +164,94 @@ def test_dead_letter_requeue_is_redispatched_and_completes_on_real_worker(api_cl
     assert [a["attempt_number"] for a in attempts] == [1, 2]
     assert attempts[0]["worker_identifier"] == "worker-low@ci-prior-run"  # history untouched
     assert attempts[1]["worker_identifier"].startswith("worker-low")  # LOW priority -> worker-low
+
+
+def test_redispatch_republishes_queued_task_through_real_broker(api_client) -> None:
+    """A task that was persisted but never actually dispatched (simulating a
+    broker outage at submission time — see the README's consistency-window
+    table) should be recoverable via POST /tasks/{id}/redispatch, proven by
+    a *real* worker actually completing it, not just a 200 response.
+    """
+
+    engine = create_engine(get_settings().database_url)
+    try:
+        with Session(engine) as session:
+            task = Task(
+                task_type="echo",
+                payload={"message": "redispatch-through-real-broker"},
+                priority=TaskPriority.MEDIUM,
+                status=TaskStatus.QUEUED,
+            )
+            session.add(task)
+            session.commit()
+            task_id = str(task.id)
+    finally:
+        engine.dispose()
+
+    response = api_client.post(f"/tasks/{task_id}/redispatch")
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "QUEUED"
+
+    body = wait_for_task_status(api_client, task_id, {"COMPLETED", "FAILED", "DEAD_LETTER"})
+
+    assert body["status"] == "COMPLETED", body
+    assert body["attempt_count"] == 1
+
+    detail = api_client.get(f"/tasks/{task_id}").json()
+    assert detail["execution_attempts"][0]["worker_identifier"].startswith("worker-medium")
+
+
+def test_stale_running_task_is_reclaimed_and_completes_on_real_worker(api_client) -> None:
+    """The full lease-recovery path against real infrastructure: a task
+    whose lease has already expired while still RUNNING (simulating a
+    crashed worker — a real crash-and-wait would make this test slow and
+    still wouldn't test anything the expired-lease state itself doesn't
+    already fully determine) is reclaimed by POST /recovery/stale-running,
+    redispatched through the *real* broker, and completed by a *real*
+    worker — proving the whole chain, not just the DB-state transition that
+    tests/test_recovery.py already covers under SQLite.
+    """
+
+    engine = create_engine(get_settings().database_url)
+    try:
+        with Session(engine) as session:
+            task = Task(
+                task_type="echo",
+                payload={"message": "stale-recovery-through-real-broker"},
+                priority=TaskPriority.HIGH,
+                status=TaskStatus.RUNNING,
+                started_at=datetime.now(UTC) - timedelta(minutes=10),
+                lease_expires_at=datetime.now(UTC) - timedelta(seconds=1),
+            )
+            task.execution_attempts.append(
+                TaskExecutionAttempt(
+                    attempt_number=1, worker_identifier="worker-high@ci-presumed-crashed"
+                )
+            )
+            session.add(task)
+            session.commit()
+            task_id = str(task.id)
+    finally:
+        engine.dispose()
+
+    response = api_client.post("/recovery/stale-running")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["reclaimed_count"] == 1
+    assert body["reclaimed"][0]["task_id"] == task_id
+    assert body["reclaimed"][0]["outcome"] == "QUEUED"
+    assert body["reclaimed"][0]["redispatched"] is True
+
+    detail_body = wait_for_task_status(api_client, task_id, {"COMPLETED", "FAILED", "DEAD_LETTER"})
+
+    assert detail_body["status"] == "COMPLETED", detail_body
+    assert detail_body["attempt_count"] == 2  # abandoned attempt preserved + the reclaimed one
+
+    detail = api_client.get(f"/tasks/{task_id}").json()
+    attempts = detail["execution_attempts"]
+    assert attempts[0]["worker_identifier"] == "worker-high@ci-presumed-crashed"
+    assert attempts[0]["error"] == "Execution lease expired; worker presumed lost"
+    assert attempts[1]["worker_identifier"].startswith("worker-high")
 
 
 def test_monitoring_reflects_real_infrastructure(api_client) -> None:
