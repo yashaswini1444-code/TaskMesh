@@ -30,3 +30,8 @@ check_untyped_defs = true
 [[tool.mypy.overrides]]
 module = ["celery.*", "kombu.*"]
 ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+markers = [
+    "integration: requires a real PostgreSQL + Redis + Celery worker stack (see tests/integration/); excluded from the default run.",
+]
