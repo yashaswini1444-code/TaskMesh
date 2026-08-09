@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime, timedelta, timezone
 from typing import Protocol
 
@@ -8,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.models import Task, TaskStatus
 from app.schemas.monitoring import (
+    DatabaseStatus,
     MonitoringSummary,
     QueueStatus,
     TaskCounts,
@@ -17,8 +19,11 @@ from app.schemas.monitoring import (
 )
 from app.workers.celery_app import celery_app
 
+logger = logging.getLogger("taskmesh.monitoring")
+
 MONITORING_WINDOW_SECONDS = 60
 MONITORED_QUEUES = ("high", "medium", "low")
+DATABASE_UNAVAILABLE_MESSAGE = "Database monitoring unavailable"
 
 
 class WorkerMonitor(Protocol):
@@ -93,13 +98,12 @@ def get_queue_monitor() -> QueueMonitor:
     return queue_monitor
 
 
-def build_monitoring_summary(
-    session: Session,
-    workers: WorkerStatus,
-    queues: QueueStatus,
-    *,
-    now: datetime | None = None,
-) -> MonitoringSummary:
+def _query_task_metrics(
+    session: Session, current_time: datetime
+) -> tuple[TaskCounts, ThroughputMetrics, list[Task], list[Task]]:
+    """Run the DB-dependent monitoring queries. Raises on connection/query failure;
+    callers are responsible for catching and degrading gracefully."""
+
     status_rows = session.execute(
         select(Task.status, func.count(Task.id)).group_by(Task.status)
     ).all()
@@ -112,14 +116,16 @@ def build_monitoring_summary(
         dead_letter=counts.get(TaskStatus.DEAD_LETTER, 0),
     )
 
-    current_time = now or datetime.now(timezone.utc)
     window_start = current_time - timedelta(seconds=MONITORING_WINDOW_SECONDS)
-    completed_in_window = session.scalar(
-        select(func.count(Task.id)).where(
-            Task.status == TaskStatus.COMPLETED,
-            Task.completed_at >= window_start,
+    completed_in_window = (
+        session.scalar(
+            select(func.count(Task.id)).where(
+                Task.status == TaskStatus.COMPLETED,
+                Task.completed_at >= window_start,
+            )
         )
-    ) or 0
+        or 0
+    )
     throughput = ThroughputMetrics(
         window_seconds=MONITORING_WINDOW_SECONDS,
         completed=completed_in_window,
@@ -139,7 +145,45 @@ def build_monitoring_summary(
             .limit(10)
         )
     )
+    return task_counts, throughput, recent_tasks, recent_failures
+
+
+def build_monitoring_summary(
+    session: Session,
+    workers: WorkerStatus,
+    queues: QueueStatus,
+    *,
+    now: datetime | None = None,
+) -> MonitoringSummary:
+    """Build the operational snapshot. A database outage degrades this endpoint
+    instead of raising: ``database.available`` becomes ``False`` and ``tasks``/
+    ``throughput`` are left unset rather than fabricated as zero. Worker and
+    queue telemetry (already gathered by the caller) are reported independently
+    of database health, matching how ``CeleryWorkerMonitor``/``RedisQueueMonitor``
+    already degrade."""
+
+    current_time = now or datetime.now(timezone.utc)
+    task_counts: TaskCounts | None
+    throughput: ThroughputMetrics | None
+    recent_tasks: list[Task]
+    recent_failures: list[Task]
+    try:
+        task_counts, throughput, recent_tasks, recent_failures = _query_task_metrics(
+            session, current_time
+        )
+        database_status = DatabaseStatus(available=True)
+    except Exception:
+        logger.exception("Database monitoring query failed")
+        task_counts = None
+        throughput = None
+        recent_tasks = []
+        recent_failures = []
+        database_status = DatabaseStatus(
+            available=False, error=DATABASE_UNAVAILABLE_MESSAGE
+        )
+
     return MonitoringSummary(
+        database=database_status,
         workers=workers,
         queues=queues,
         tasks=task_counts,

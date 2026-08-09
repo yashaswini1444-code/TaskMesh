@@ -30,13 +30,20 @@ function emptyState(title, detail = "") {
 
 function deriveHealth(data) {
   if (!data) return { label: "Offline", className: "offline" };
-  if (!data.queues.available || !data.workers.available) {
+  if (!data.database.available || !data.queues.available || !data.workers.available) {
     return { label: "Degraded", className: "degraded" };
   }
   return { label: "Healthy", className: "" };
 }
 
 function renderMetrics(data) {
+  if (!data.tasks || !data.throughput) {
+    $("metric-grid").innerHTML = emptyState(
+      "Task metrics unavailable",
+      data.database.error || "Database is not currently reachable.",
+    );
+    return;
+  }
   const metrics = [
     ["Queued", data.tasks.queued, "Across persisted task records", "#aa6d08"],
     ["Running", data.tasks.running, "Currently executing", "#2878cf"],
@@ -53,6 +60,13 @@ function renderMetrics(data) {
 }
 
 function renderLifecycle(data) {
+  if (!data.tasks) {
+    $("task-flow").innerHTML = emptyState(
+      "Lifecycle data unavailable",
+      "Database is not currently reachable.",
+    );
+    return;
+  }
   $("task-flow").innerHTML = `
     <div class="flow-node" style="--node-color:var(--amber)"><span>QUEUED</span><strong>${data.tasks.queued}</strong></div>
     <i class="flow-connector" aria-hidden="true"></i>
@@ -108,7 +122,7 @@ function renderTasks(tasks) {
 
 function renderFailurePanels(data) {
   const deadLetters = data.recent_failures.filter((task) => task.status === "DEAD_LETTER");
-  $("dead-count").textContent = `${data.tasks.dead_letter} total`;
+  $("dead-count").textContent = data.tasks ? `${data.tasks.dead_letter} total` : "Unknown";
   $("dead-letter-list").innerHTML = deadLetters.length ? deadLetters.map((task) => `
     <article class="compact-item" data-inspect="${escapeHtml(task.id)}" tabindex="0">
       <div><div class="compact-title"><span class="mono" title="${escapeHtml(task.id)}">${shortId(task.id)}</span>${badge(task.status)}</div><div class="error-preview">${escapeHtml(task.last_error || "No error detail")}</div><div class="compact-meta">${escapeHtml(task.task_type)} · ${task.retry_count}/${task.max_retries} retries · ${escapeHtml(clockTime(task.completed_at))}</div></div>
@@ -120,9 +134,14 @@ function renderFailurePanels(data) {
 }
 
 function renderHealth(data) {
+  // "API" is not a fabricated indicator: this function only ever runs after a
+  // successful fetch of /monitoring/summary, so "Reachable" is true by
+  // construction, not a hardcoded guess. It is worded differently from
+  // "Healthy" to avoid implying a deeper API-side health check that does not
+  // exist. Database/Celery/Redis are each derived from real response fields.
   const states = [
-    ["API", "Healthy", ""],
-    ["Database", "Healthy", ""],
+    ["API", "Reachable", ""],
+    ["Database", data.database.available ? "Healthy" : "Unavailable", data.database.available ? "" : "unknown"],
     ["Celery", data.workers.available ? "Online" : "Unavailable", data.workers.available ? "" : "unknown"],
     ["Redis", data.queues.available ? "Online" : "Unavailable", data.queues.available ? "" : "unknown"],
     ["Workers", data.workers.available ? `${data.workers.count} online` : "Unknown", data.workers.available ? "" : "unknown"],
@@ -131,6 +150,12 @@ function renderHealth(data) {
 }
 
 function renderChart(value) {
+  if (value === null || value === undefined) {
+    $("throughput-value").textContent = "—";
+    $("throughput-chart").innerHTML = "Database unavailable";
+    $("throughput-chart").className = "chart-empty";
+    return;
+  }
   throughputHistory.push(Number(value) || 0);
   if (throughputHistory.length > MAX_HISTORY_POINTS) throughputHistory.shift();
   $("throughput-value").textContent = `${Number(value).toFixed(1)}/min`;
@@ -155,7 +180,7 @@ function renderChart(value) {
 function renderSnapshot(data) {
   renderMetrics(data); renderLifecycle(data); renderQueues(data.queues);
   renderWorkers(data.workers); renderTasks(data.recent_tasks);
-  renderFailurePanels(data); renderHealth(data); renderChart(data.throughput.per_minute);
+  renderFailurePanels(data); renderHealth(data); renderChart(data.throughput ? data.throughput.per_minute : null);
   const health = deriveHealth(data);
   $("overall-health").innerHTML = `<i class="status-dot ${health.className}"></i>${health.label}`;
   $("live-dot").className = `status-dot ${health.className}`;

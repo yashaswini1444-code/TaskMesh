@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.schemas.task import TaskRead
 
@@ -25,6 +25,13 @@ class QueueStatus(BaseModel):
     error: str | None = None
 
 
+class DatabaseStatus(BaseModel):
+    """Reachability of the persistence layer itself, not application data."""
+
+    available: bool
+    error: str | None = None
+
+
 class TaskCounts(BaseModel):
     queued: int
     running: int
@@ -40,9 +47,13 @@ class ThroughputMetrics(BaseModel):
 
 
 class MonitoringSummary(BaseModel):
+    """Operational snapshot. ``tasks``/``throughput`` are ``None`` only when
+    ``database.available`` is ``False`` — counts are never fabricated."""
+
+    database: DatabaseStatus
     workers: WorkerStatus
     queues: QueueStatus
-    tasks: TaskCounts
-    throughput: ThroughputMetrics
-    recent_tasks: list[TaskRead]
-    recent_failures: list[TaskRead]
+    tasks: TaskCounts | None = None
+    throughput: ThroughputMetrics | None = None
+    recent_tasks: list[TaskRead] = Field(default_factory=list)
+    recent_failures: list[TaskRead] = Field(default_factory=list)

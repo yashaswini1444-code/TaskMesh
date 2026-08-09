@@ -86,6 +86,7 @@ def test_monitoring_summary_combines_durable_and_infrastructure_metrics(
 
     assert response.status_code == 200
     body = response.json()
+    assert body["database"] == {"available": True, "error": None}
     assert body["workers"] == {
         "available": True,
         "count": 1,
@@ -163,3 +164,67 @@ def test_infrastructure_monitors_degrade_without_leaking_errors(monkeypatch) -> 
     queues = RedisQueueMonitor().inspect()
     assert queues.available is False
     assert queues.error == "Queue monitoring unavailable"
+
+
+class BrokenSession:
+    """Simulates a database that cannot be queried (connection refused, pool
+    exhausted, etc.) without depending on a real broken engine."""
+
+    def execute(self, *args: object, **kwargs: object) -> None:
+        raise RuntimeError("connection refused: password authentication failed")
+
+    def scalar(self, *args: object, **kwargs: object) -> None:
+        raise RuntimeError("connection refused: password authentication failed")
+
+    def scalars(self, *args: object, **kwargs: object) -> None:
+        raise RuntimeError("connection refused: password authentication failed")
+
+
+def test_database_outage_degrades_monitoring_without_fabricating_or_leaking(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    summary = build_monitoring_summary(
+        BrokenSession(),  # type: ignore[arg-type]
+        WorkerStatus(available=True, count=0, items=[]),
+        QueueStatus(available=True, high=0, medium=0, low=0, total=0),
+    )
+
+    assert summary.database.available is False
+    assert summary.database.error == "Database monitoring unavailable"
+    assert summary.tasks is None
+    assert summary.throughput is None
+    assert summary.recent_tasks == []
+    assert summary.recent_failures == []
+    assert "password" not in (summary.database.error or "")
+
+
+@pytest.fixture
+def broken_db_monitoring_client() -> Generator[TestClient, None, None]:
+    def override_get_db() -> Generator[BrokenSession, None, None]:
+        yield BrokenSession()
+
+    app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_worker_monitor] = FakeWorkerMonitor
+    app.dependency_overrides[get_queue_monitor] = FakeQueueMonitor
+    with TestClient(app) as client:
+        yield client
+    app.dependency_overrides.clear()
+
+
+def test_monitoring_endpoint_returns_200_when_database_is_unavailable(
+    broken_db_monitoring_client: TestClient,
+) -> None:
+    response = broken_db_monitoring_client.get("/monitoring/summary")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["database"] == {
+        "available": False,
+        "error": "Database monitoring unavailable",
+    }
+    assert body["tasks"] is None
+    assert body["throughput"] is None
+    assert body["recent_tasks"] == []
+    assert body["recent_failures"] == []
+    assert body["workers"]["available"] is True
+    assert body["queues"]["available"] is True
