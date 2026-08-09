@@ -4,12 +4,12 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import (
+    JSON,
     CheckConstraint,
     DateTime,
     Enum,
     Index,
     Integer,
-    JSON,
     String,
     Text,
     func,

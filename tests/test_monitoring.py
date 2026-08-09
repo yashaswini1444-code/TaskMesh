@@ -1,5 +1,5 @@
 from collections.abc import Generator
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -43,7 +43,7 @@ def monitoring_client() -> Generator[TestClient, None, None]:
         poolclass=StaticPool,
     )
     Base.metadata.create_all(engine)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     with Session(engine) as seed:
         seed.add_all(
             [
@@ -115,7 +115,7 @@ def test_monitoring_summary_combines_durable_and_infrastructure_metrics(
 def test_database_metrics_use_completed_timestamp_window() -> None:
     engine = create_engine("sqlite://", poolclass=StaticPool)
     Base.metadata.create_all(engine)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     with Session(engine) as session:
         session.add_all(
             [

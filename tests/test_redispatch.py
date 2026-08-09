@@ -38,7 +38,9 @@ def redispatch_client() -> Generator[tuple[TestClient, Mock, Session], None, Non
     engine.dispose()
 
 
-def make_task(session: Session, status: TaskStatus, priority: TaskPriority = TaskPriority.HIGH) -> Task:
+def make_task(
+    session: Session, status: TaskStatus, priority: TaskPriority = TaskPriority.HIGH
+) -> Task:
     task = Task(
         task_type="echo",
         payload={"message": "hi"},

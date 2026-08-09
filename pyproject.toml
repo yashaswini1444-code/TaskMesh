@@ -1,0 +1,32 @@
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = [
+    # UP042: "inherit from enum.StrEnum instead of (str, Enum)". Not applied:
+    # TaskPriority/TaskStatus/LifecycleOutcome are persisted, serialized over
+    # the API, and compared throughout the codebase; StrEnum's __str__/repr
+    # and equality semantics differ subtly from a manual (str, Enum) mixin
+    # across Python versions, and this isn't tested well enough to trust a
+    # mechanical rewrite of domain-critical enums. (str, Enum) remains
+    # correct, idiomatic Python — this is a style preference, not a bug.
+    "UP042",
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app", "scripts", "tests", "migrations"]
+
+[tool.mypy]
+python_version = "3.12"
+files = ["app"]
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true
+disallow_untyped_defs = true
+check_untyped_defs = true
+
+[[tool.mypy.overrides]]
+module = ["celery.*", "kombu.*"]
+ignore_missing_imports = true

@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
 from redis import Redis
@@ -17,6 +17,7 @@ from app.schemas.monitoring import (
     WorkerItem,
     WorkerStatus,
 )
+from app.schemas.task import TaskRead
 from app.services.recovery import count_stale_running
 from app.workers.celery_app import celery_app
 
@@ -70,10 +71,17 @@ class RedisQueueMonitor:
                 socket_timeout=1.0,
                 decode_responses=True,
             )
-            depths = {queue: int(client.llen(queue)) for queue in MONITORED_QUEUES}
+            # redis-py's stubs type llen() as Awaitable[int] | int to cover
+            # both its sync and async clients; this is always int here.
+            depths = {
+                queue: int(client.llen(queue))  # type: ignore[arg-type]
+                for queue in MONITORED_QUEUES
+            }
             return QueueStatus(
                 available=True,
-                **depths,
+                high=depths["high"],
+                medium=depths["medium"],
+                low=depths["low"],
                 total=sum(depths.values()),
             )
         except Exception:
@@ -169,7 +177,7 @@ def build_monitoring_summary(
     of database health, matching how ``CeleryWorkerMonitor``/``RedisQueueMonitor``
     already degrade."""
 
-    current_time = now or datetime.now(timezone.utc)
+    current_time = now or datetime.now(UTC)
     task_counts: TaskCounts | None
     throughput: ThroughputMetrics | None
     recent_tasks: list[Task]
@@ -195,6 +203,6 @@ def build_monitoring_summary(
         queues=queues,
         tasks=task_counts,
         throughput=throughput,
-        recent_tasks=recent_tasks,
-        recent_failures=recent_failures,
+        recent_tasks=[TaskRead.model_validate(task) for task in recent_tasks],
+        recent_failures=[TaskRead.model_validate(task) for task in recent_failures],
     )

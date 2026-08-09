@@ -1,6 +1,6 @@
 import threading
 from collections.abc import Generator
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -52,7 +52,7 @@ def make_running_task(
             status=TaskStatus.RUNNING,
             retry_count=retry_count,
             max_retries=max_retries,
-            started_at=datetime.now(timezone.utc) - timedelta(minutes=10),
+            started_at=datetime.now(UTC) - timedelta(minutes=10),
             lease_expires_at=lease_expires_at,
         )
         task.execution_attempts.append(
@@ -63,7 +63,9 @@ def make_running_task(
         return task.id
 
 
-def load(session_factory: sessionmaker[Session], task_id: object) -> tuple[Task, list[TaskExecutionAttempt]]:
+def load(
+    session_factory: sessionmaker[Session], task_id: object
+) -> tuple[Task, list[TaskExecutionAttempt]]:
     with session_factory() as session:
         task = session.get(Task, task_id)
         assert task is not None
@@ -81,7 +83,7 @@ def load(session_factory: sessionmaker[Session], task_id: object) -> tuple[Task,
 def test_stale_running_task_is_reclaimed_requeued_and_redispatched(
     session_factory: sessionmaker[Session],
 ) -> None:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     task_id = make_running_task(session_factory, lease_expires_at=now - timedelta(seconds=1))
     dispatcher = Mock(spec=TaskDispatcher)
 
@@ -108,7 +110,7 @@ def test_stale_running_task_is_reclaimed_requeued_and_redispatched(
 def test_non_stale_running_task_is_left_untouched(
     session_factory: sessionmaker[Session],
 ) -> None:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     task_id = make_running_task(session_factory, lease_expires_at=now + timedelta(minutes=5))
     dispatcher = Mock(spec=TaskDispatcher)
 
@@ -125,7 +127,7 @@ def test_non_stale_running_task_is_left_untouched(
 def test_stale_running_task_with_exhausted_retries_becomes_dead_letter(
     session_factory: sessionmaker[Session],
 ) -> None:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     task_id = make_running_task(
         session_factory, lease_expires_at=now - timedelta(seconds=1), retry_count=3, max_retries=3
     )
@@ -146,7 +148,7 @@ def test_stale_running_task_with_exhausted_retries_becomes_dead_letter(
 def test_reclaim_with_failed_redispatch_leaves_task_queued_for_manual_redispatch(
     session_factory: sessionmaker[Session],
 ) -> None:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     task_id = make_running_task(session_factory, lease_expires_at=now - timedelta(seconds=1))
     dispatcher = Mock(spec=TaskDispatcher)
     dispatcher.dispatch.side_effect = TaskDispatchError("broker unavailable")
@@ -162,7 +164,7 @@ def test_reclaim_with_failed_redispatch_leaves_task_queued_for_manual_redispatch
 def test_repeated_recovery_scan_is_a_no_op_after_first_reclaim(
     session_factory: sessionmaker[Session],
 ) -> None:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     task_id = make_running_task(session_factory, lease_expires_at=now - timedelta(seconds=1))
     dispatcher = Mock(spec=TaskDispatcher)
 
@@ -201,7 +203,7 @@ def test_concurrent_recovery_scans_reclaim_a_task_exactly_once(tmp_path: Path) -
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine, expire_on_commit=False)
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     task_id = make_running_task(factory, lease_expires_at=now - timedelta(seconds=1))
 
     results: list[list] = []
@@ -236,7 +238,7 @@ def test_concurrent_recovery_scans_reclaim_a_task_exactly_once(tmp_path: Path) -
 def test_late_completion_after_lease_reclaim_is_rejected_not_corrupting_recovered_state(
     session_factory: sessionmaker[Session],
 ) -> None:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     task_id = make_running_task(session_factory, lease_expires_at=now - timedelta(seconds=1))
     dispatcher = Mock(spec=TaskDispatcher)
 
@@ -265,7 +267,7 @@ def test_late_completion_after_lease_reclaim_is_rejected_not_corrupting_recovere
 def test_late_failure_after_lease_reclaim_is_rejected_not_corrupting_recovered_state(
     session_factory: sessionmaker[Session],
 ) -> None:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     task_id = make_running_task(
         session_factory, lease_expires_at=now - timedelta(seconds=1), retry_count=3, max_retries=3
     )
@@ -315,7 +317,7 @@ def test_recovery_endpoint_reclaims_stale_task_and_returns_summary(
     recovery_client: tuple[TestClient, Mock, sessionmaker[Session]],
 ) -> None:
     client, dispatcher, factory = recovery_client
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     task_id = make_running_task(factory, lease_expires_at=now - timedelta(seconds=1))
 
     response = client.post("/recovery/stale-running")

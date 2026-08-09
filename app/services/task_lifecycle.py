@@ -1,6 +1,6 @@
 from collections.abc import Callable, Mapping
 from copy import deepcopy
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from enum import Enum
 from typing import Any
 from uuid import UUID
@@ -68,7 +68,7 @@ class LifecycleOutcome(str, Enum):
 
 
 def _utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def retry_countdown(retry_number: int) -> int:
@@ -116,7 +116,10 @@ def _claim_task(
                 lease_expires_at=lease_expires_at,
             )
         )
-        if claim.rowcount != 1:
+        # SQLAlchemy's Session.execute() return type (Result[Any]) isn't
+        # narrowed to CursorResult by the stubs, though UPDATE always
+        # returns one with a real rowcount at runtime.
+        if claim.rowcount != 1:  # type: ignore[attr-defined]
             task_exists = session.scalar(select(Task.id).where(Task.id == task_id))
             session.rollback()
             if task_exists is None:
@@ -127,6 +130,7 @@ def _claim_task(
             select(func.coalesce(func.max(TaskExecutionAttempt.attempt_number), 0) + 1)
             .where(TaskExecutionAttempt.task_id == task_id)
         )
+        assert attempt_number is not None  # COALESCE(..., 0) + 1 is never NULL
         task = session.get(Task, task_id)
         if task is None:  # Defensive: the successful UPDATE guarantees existence.
             session.rollback()
@@ -170,7 +174,7 @@ def _complete_task(
                 lease_expires_at=None,
             )
         )
-        if result.rowcount != 1:
+        if result.rowcount != 1:  # type: ignore[attr-defined]
             session.rollback()
             raise TaskReclaimedError(
                 f"Task {task_id} was reclaimed before this attempt completed"
@@ -238,7 +242,7 @@ def _finalize_failure(
                 lease_expires_at=None,
             )
         )
-        if result.rowcount != 1:
+        if result.rowcount != 1:  # type: ignore[attr-defined]
             session.rollback()
             raise TaskReclaimedError(
                 f"Task {task_id} was reclaimed before this attempt failed"

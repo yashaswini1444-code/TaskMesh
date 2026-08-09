@@ -1,0 +1,6 @@
+# Development/CI-only tooling. Kept separate from requirements.txt so
+# production installs stay minimal.
+-r requirements.txt
+
+ruff>=0.16,<0.17
+mypy>=2.3,<3.0

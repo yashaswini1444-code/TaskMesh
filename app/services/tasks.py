@@ -44,7 +44,8 @@ def requeue_dead_letter_task(session: Session, task_id: UUID) -> Task | None:
             last_error=None,
         )
     )
-    if result.rowcount != 1:
+    # See task_lifecycle.py for why this needs a type: ignore.
+    if result.rowcount != 1:  # type: ignore[attr-defined]
         session.rollback()
         return None
     session.commit()

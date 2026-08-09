@@ -1,9 +1,11 @@
-from app.workers.celery_app import celery_app
+from celery import Task as CeleryTask
+
 from app.services.task_lifecycle import TaskRetryRequested, process_task
+from app.workers.celery_app import celery_app
 
 
 @celery_app.task(bind=True, name="taskmesh.execute_task", ignore_result=True)
-def execute_task(self: object, task_id: str) -> None:
+def execute_task(self: CeleryTask, task_id: str) -> None:
     """Thin Celery entry point for durable task lifecycle processing."""
 
     request = getattr(self, "request", None)
@@ -17,7 +19,7 @@ def execute_task(self: object, task_id: str) -> None:
             exc=retry_request,
             countdown=retry_request.countdown,
             max_retries=retry_request.max_retries,
-        )
+        ) from retry_request
 
 
 @celery_app.task(name="taskmesh.recover_stale_tasks", ignore_result=True)

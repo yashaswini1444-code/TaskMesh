@@ -45,7 +45,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 from sqlalchemy import func, select, update
@@ -74,7 +74,7 @@ class ReclaimedTask:
 
 
 def _utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _reclaim_one(
@@ -118,7 +118,8 @@ def _reclaim_one(
                 lease_expires_at=None,
             )
         )
-        if result.rowcount != 1:
+        # See task_lifecycle.py for why this needs a type: ignore.
+        if result.rowcount != 1:  # type: ignore[attr-defined]
             # Lost the race: the original worker finished (or another
             # recovery pass reclaimed it) between the SELECT above and here.
             session.rollback()
