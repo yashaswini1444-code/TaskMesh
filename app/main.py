@@ -7,7 +7,9 @@ from app.api.monitoring import router as monitoring_router
 from app.api.recovery import router as recovery_router
 from app.api.tasks import router as tasks_router
 from app.core.config import get_settings
+from app.core.logging import configure_logging
 
+configure_logging()
 settings = get_settings()
 
 app = FastAPI(

@@ -1,3 +1,4 @@
+import logging
 from uuid import UUID
 
 from sqlalchemy import Select, select, update
@@ -5,6 +6,8 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.models import Task, TaskPriority, TaskStatus
 from app.schemas.task import TaskCreate
+
+logger = logging.getLogger("taskmesh.tasks")
 
 
 def create_task(session: Session, task_data: TaskCreate) -> Task:
@@ -21,6 +24,12 @@ def create_task(session: Session, task_data: TaskCreate) -> Task:
         session.rollback()
         raise
     session.refresh(task)
+    logger.info(
+        "task created task_id=%s task_type=%s priority=%s",
+        task.id,
+        task.task_type,
+        task.priority.value,
+    )
     return task
 
 
@@ -49,6 +58,7 @@ def requeue_dead_letter_task(session: Session, task_id: UUID) -> Task | None:
         session.rollback()
         return None
     session.commit()
+    logger.info("dead-letter task requeued task_id=%s", task_id)
     return get_task(session, task_id)
 
 

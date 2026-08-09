@@ -1,3 +1,4 @@
+import logging
 from collections.abc import Callable, Mapping
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
@@ -16,6 +17,8 @@ from app.services.execution import (
     TaskExecutionError,
     execute_job,
 )
+
+logger = logging.getLogger("taskmesh.lifecycle")
 
 SessionFactory = Callable[[], Session]
 JobExecutor = Callable[[str, Mapping[str, Any]], None]
@@ -145,6 +148,15 @@ def _claim_task(
         session.add(attempt)
         session.commit()
 
+        logger.info(
+            "task claimed task_id=%s task_type=%s attempt_number=%s "
+            "worker_identifier=%s lease_expires_at=%s",
+            task_id,
+            task.task_type,
+            attempt.attempt_number,
+            worker_identifier,
+            lease_expires_at.isoformat(),
+        )
         return attempt.id, task.task_type, deepcopy(task.payload)
 
 
@@ -176,6 +188,11 @@ def _complete_task(
         )
         if result.rowcount != 1:  # type: ignore[attr-defined]
             session.rollback()
+            logger.warning(
+                "late completion rejected task_id=%s attempt_id=%s reason=reclaimed_by_recovery",
+                task_id,
+                attempt_id,
+            )
             raise TaskReclaimedError(
                 f"Task {task_id} was reclaimed before this attempt completed"
             )
@@ -186,6 +203,13 @@ def _complete_task(
         attempt.finished_at = finished_at
         attempt.error = None
         session.commit()
+
+        logger.info(
+            "task completed task_id=%s attempt_id=%s attempt_number=%s",
+            task_id,
+            attempt_id,
+            attempt.attempt_number,
+        )
 
 
 def _finalize_failure(
@@ -244,6 +268,11 @@ def _finalize_failure(
         )
         if result.rowcount != 1:  # type: ignore[attr-defined]
             session.rollback()
+            logger.warning(
+                "late failure rejected task_id=%s attempt_id=%s reason=reclaimed_by_recovery",
+                task_id,
+                attempt_id,
+            )
             raise TaskReclaimedError(
                 f"Task {task_id} was reclaimed before this attempt failed"
             )
@@ -256,13 +285,32 @@ def _finalize_failure(
         session.commit()
 
         if retry_requested:
+            countdown = retry_countdown(new_retry_count)
+            logger.info(
+                "retry scheduled task_id=%s attempt_number=%s retry_number=%s "
+                "max_retries=%s countdown_seconds=%s",
+                task_id,
+                attempt.attempt_number,
+                new_retry_count,
+                max_retries,
+                countdown,
+            )
             return TaskRetryRequested(
                 task_id=task_id,
                 retry_number=new_retry_count,
-                countdown=retry_countdown(new_retry_count),
+                countdown=countdown,
                 max_retries=max_retries,
                 error_message=error_message,
             )
+
+        logger.info(
+            "task %s task_id=%s attempt_number=%s retry_count=%s max_retries=%s",
+            "dead-lettered" if new_status is TaskStatus.DEAD_LETTER else "failed permanently",
+            task_id,
+            attempt.attempt_number,
+            new_retry_count,
+            max_retries,
+        )
         return None
 
 
