@@ -38,7 +38,7 @@ mocks, and can be defended in detail if asked "how do you know?"
   reported and degrade independently, with no fabricated data and no
   leaked exception detail on any one of them failing.
 - Built a CI pipeline with three independent jobs: a fast deterministic
-  suite (SQLite, no infrastructure, ~10s), static analysis (ruff + mypy),
+  suite (SQLite, no infrastructure, ~5s), static analysis (ruff + mypy),
   and a full integration job that provisions real PostgreSQL and Redis
   service containers, runs real Celery workers matching the production
   topology, and drives the whole stack through the live HTTP API.
@@ -58,7 +58,7 @@ True, but state the condition — don't let the headline outrun the scope.
 
 - "Tested against a production-shaped topology" — true of the CI
   `integration` job and Docker Compose, both of which run one worker per
-  queue plus a scheduler; the *deterministic* suite (94 of 106 tests) runs
+  queue plus a scheduler; the *deterministic* suite (97 of 109 tests) runs
   against SQLite only and proves business logic, not infrastructure
   behavior.
 - "At-least-once task delivery" — true given the configured Celery ack
@@ -70,7 +70,7 @@ True, but state the condition — don't let the headline outrun the scope.
   not true for every possible failure mode (e.g. no transactional outbox,
   so a broker outage during submission still requires the redispatch action
   to be taken).
-- "94 passing tests" (or whatever the current count is) — state that this
+- "97 passing tests" (or whatever the current count is) — state that this
   is the deterministic count; mention the additional integration tests
   separately if citing a total, since they require infrastructure the
   reader can't assume is running.

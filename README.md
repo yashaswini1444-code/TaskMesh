@@ -2,6 +2,19 @@
 
 **Asynchronous Job Processing & Distributed Task Operations**
 
+[![tests](https://github.com/yashaswini1444-code/TaskMesh/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/yashaswini1444-code/TaskMesh/actions/workflows/tests.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-2ea44f.svg)](LICENSE)
+[![Python 3.12](https://img.shields.io/badge/python-3.12-3776AB?logo=python&logoColor=white)](requirements.txt)
+[![Ruff](https://img.shields.io/badge/lint-ruff-D7FF64?logo=ruff&logoColor=black)](pyproject.toml)
+[![mypy](https://img.shields.io/badge/types-mypy-2A6DB2)](pyproject.toml)
+[![Tests](https://img.shields.io/badge/tests-109%20passing-2ea44f)](tests/)
+
+[![FastAPI](https://img.shields.io/badge/FastAPI-005571?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
+[![Redis](https://img.shields.io/badge/Redis-DC382D?logo=redis&logoColor=white)](https://redis.io/)
+[![Celery](https://img.shields.io/badge/Celery-37814A?logo=celery&logoColor=white)](https://docs.celeryq.dev/)
+[![Docker Compose](https://img.shields.io/badge/Docker%20Compose-2496ED?logo=docker&logoColor=white)](docker-compose.yml)
+
 TaskMesh is a portfolio-grade job-processing system built with FastAPI,
 SQLAlchemy, PostgreSQL, Redis, and Celery. It exists to demonstrate — not
 just describe — a set of distributed-systems problems and their trade-offs:
@@ -10,7 +23,7 @@ routing, at-least-once delivery made safe by an atomic claim, bounded retry
 with dead-letter handling, and recovery from a worker that crashes mid-task.
 
 Every claim in this document is backed by a test that runs in CI — the
-deterministic suite (94 tests, SQLite, no infrastructure, ~10s) and a
+deterministic suite (97 tests, SQLite, no infrastructure, ~5s) and a
 separate integration job that provisions real PostgreSQL and Redis
 containers and runs the actual multi-worker Celery topology
 (`tests/integration/`, 12 more tests). See
@@ -259,7 +272,7 @@ curl -X POST http://localhost:8000/recovery/stale-running
 ## Tests
 
 ```powershell
-# Deterministic suite: SQLite, no infrastructure, ~10s
+# Deterministic suite: SQLite, no infrastructure, ~5s
 .\.venv\Scripts\python.exe -m pytest -v --basetemp=.pytest_tmp -p no:cacheprovider -m "not integration"
 
 # Static analysis
@@ -350,4 +363,4 @@ lock.
 
 ## License
 
-No license has been granted. Add an explicit license before redistribution.
+[MIT](LICENSE) © 2026 Yashaswini L

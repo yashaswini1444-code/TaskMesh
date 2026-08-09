@@ -89,7 +89,7 @@ should be set well above realistic job duration.
 ## Why use SQLite in tests, and how do you know it also works on PostgreSQL?
 
 SQLite makes the deterministic suite fast and infrastructure-independent —
-94 tests run in about 10 seconds with zero setup. But that suite alone would
+97 tests run in about 5 seconds with zero setup. But that suite alone would
 only prove the code works against SQLite. A separate CI job
 (`integration`, marked `pytest.mark.integration`, excluded from the default
 run) starts real `postgres:17-alpine` and `redis:7-alpine` service
