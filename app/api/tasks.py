@@ -29,9 +29,10 @@ def submit_task(
     try:
         dispatcher.dispatch(task.id, task.priority)
     except TaskDispatchError as exc:
-        # Persistence and broker publication are intentionally separate in
-        # Milestone 4. The committed QUEUED task remains traceable if Redis is
-        # unavailable; a durable outbox is deferred to a later milestone.
+        # Persistence and broker publication are intentionally separate, not
+        # atomic (no transactional outbox). The committed QUEUED task remains
+        # traceable and redispatchable (POST /tasks/{id}/redispatch) if the
+        # broker was unavailable at submission time.
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={
@@ -98,6 +99,54 @@ def requeue_task(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={
                 "message": "Task was requeued but could not be dispatched",
+                "task_id": str(task.id),
+            },
+        ) from exc
+    return task
+
+
+@router.post("/{task_id}/redispatch", response_model=TaskDetail)
+def redispatch_task(
+    task_id: UUID,
+    session: DatabaseSession,
+    dispatcher: Dispatcher,
+) -> Task:
+    """Republish a broker message for a task that is already persisted and
+    QUEUED, without creating a new task or resetting any state.
+
+    Exists for the consistency window documented on POST /tasks: dispatch
+    can fail after the task is durably persisted (broker unavailable), and
+    there was previously no way to recover that specific task short of
+    manual database access. This does not implement a transactional
+    outbox — it is a manual/administrative recovery action, not an
+    automatic guarantee.
+
+    Safe to call more than once, including concurrently: the underlying
+    Celery message carries only the task id, and a worker's claim
+    (`UPDATE ... WHERE status = 'QUEUED'`) is idempotent, so an extra
+    redispatch for a task another delivery already claimed is a wasted
+    broker message, never a duplicate execution.
+    """
+
+    task = get_task(session, task_id)
+    if task is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Task not found",
+        )
+    if task.status is not TaskStatus.QUEUED:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Only QUEUED tasks can be redispatched",
+        )
+
+    try:
+        dispatcher.dispatch(task.id, task.priority)
+    except TaskDispatchError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "message": "Task remains persisted but redispatch failed",
                 "task_id": str(task.id),
             },
         ) from exc
